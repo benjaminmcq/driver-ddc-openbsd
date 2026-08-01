@@ -1,5 +1,3 @@
-#include <ddc.c>
-
 #define DDC_CMD_CAPS            0xF3
 #define DDC_HOST_ADDR_ODD       0x51
 #define DDC_HOST_ADDR_EVEN      0x50
