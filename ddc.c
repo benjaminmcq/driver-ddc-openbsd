@@ -4,8 +4,9 @@
 #include <sys/queue.h>
 #include <sys/systm.h>
 #include <sys/rwlock.h>
+
 #include <dev/i2c/i2cvar.h>
-#include <ddc.h>
+#include <dev/i2c/ddc.h>
 
 struct ddc_mapping {
         TAILQ_ENTRY(ddc_mapping)        dm_link;
