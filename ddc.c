@@ -5,14 +5,24 @@
 #include <sys/systm.h>
 #include <sys/rwlock.h>
 
+#include <linux/i2c.h>
+
 #include <dev/i2c/i2cvar.h>
 #include <dev/i2c/ddc.h>
 
+#define DDC_DEBUG
+
+#ifdef DDC_DEBUG
+#define	DPRINTF(x...)		printf(x)
+#else
+#define	DPRINTF(x...)
+#endif
+
 struct ddc_mapping {
         TAILQ_ENTRY(ddc_mapping)        dm_link;
-        struct device                   *dm_dev; /* Parent GPU driver instance (referred to as the GPU) */
-        i2c_tag_t                       dm_tag;  /* I2C device that initiates transfers from within the GPU (I2C master) */
-        i2c_addr_t                      dm_addr; /* Target monitor slave (I2C slave) */
+        struct device                  *dm_dev;     /* Parent GPU driver instance (referred to as the GPU) */
+        i2c_adapter                    *dm_adapter; /* I2C device that initiates transfers from within the GPU (I2C master) */
+        i2c_addr_t                      dm_addr;    /* Target monitor slave (I2C slave) */
 };
 
 TAILQ_HEAD(, ddc_mapping) ddcs = TAILQ_HEAD_INITIALIZER(ddcs);
@@ -29,7 +39,7 @@ unsigned char   ddc_checksum(unsigned char *, unsigned int);
  * end of the TAILQ.
  */
 int
-ddc_register(struct device *dev, i2c_tag_t tag, i2c_addr_t addr)
+ddc_register(struct device *dev, i2c_adapter *adapter, i2c_addr_t addr)
 {
         struct ddc_mapping *dm;
         dm = malloc(sizeof(*dm), M_DEVBUF, M_NOWAIT);
@@ -74,57 +84,80 @@ ddc_unregister(struct device *dev)
  *
  * Send a DDC/CI capabilities request to the device described by the given
  * ddc_mapping, and validate the response utilizing a checksum.
- * Return zero on success, or a non-zero error code on failure.
+ * Return zero on success, or a negative error code on failure.
  */
 int
 ddc_probe_device(struct device *dev, i2c_tag_t tag)
 {
         struct ddc_mapping *dm;
-        unsigned char data[3];
-        int err, len;
+        struct i2c_msg *msg;
+        uint8_t data[32], cmd[6];
+        int ret;
         rw_enter_read(&ddcs_lock);
 
         TAILQ_FOREACH(dm, &ddcs, dm_link) {
-                if (dm->dm_dev == dev && dm->dm_tag == tag)
+                if (dm->dm_dev == dev && dm->dm_adapter == adapter)
                         break;
         }
 
-        if (dm == NULL) {
-                rw_exit_read(&ddcs_lock);
-                return (ENOENT);
-        }
-
-        len = 3;
-        unsigned char cmd[6] = { DDC_HOST_ADDR_ODD, DDC_PFLAG | len,
-            DDC_CMD_CAPS, 0x00, 0x00 };
-        cmd[5] = ddc_checksum(cmd, 5);
-        iic_acquire_bus(dm->dm_tag, cold ? I2C_F_POLL : 0);
-
-        if ((err = iic_exec(dm->dm_tag, I2C_OP_WRITE_WITH_STOP, dm->dm_addr,
-            cmd, sizeof cmd, 0, 0, 0)))
+        if (dm == NULL || dm->dm_dev == NULL || dm->dm_adapter == NULL || dm->dm_addr == NULL) {
+                DPRINTF("ddc_probe_device: failed on line 101");
                 goto out;
+        }
+        
+        cmd[0] = DDC_HOST_ADDR_ODD;
+        cmd[1] = DDC_PFLAG | 3;
+        cmd[2] = DDC_CMD_CAPS;
+        cmd[3] = 0;
+        cmd[4] = 0;
+        cmd[5] = ddc_checksum(cmd, 5);
+
+        msg->addr = dm->dm_addr;
+        msg->flags = 0;
+        msg->buf = cmd;
+        msg->len = sizeof(cmd);
+
+        ret = i2c_transfer(dm->dm_adapter, msg, 1);
+
+        if (ret < 0) {
+                DPRINTF("ddc_probe_device: write failed! line 121 return value=%d\n", ret);
+                goto out;
+        }
 
         tsleep_nsec(NULL, PWAIT, "ddc", MSEC_TO_NSEC(60));
 
-        if ((err = iic_exec(dm->dm_tag, I2C_OP_READ_WITH_STOP, dm->dm_addr,
-            0, 0, data, sizeof data, 0)))
+        msg->flags = I2C_M_RD;
+        msg->buf = data;
+        msg->len = sizeof(data);
+
+        ret = i2c_transfer(dm->dm_adapter, msg, 1);
+
+        if (ret < 0) {
+                DPRINTF("ddc_probe_device: write failed! line 121 return value=%d\n", ret);
                 goto out;
+        }
+        
+        if (data < 3) {
+                DPRINTF("ddc_probe_device: no response from device! line 132 return value=-ENODEV\n");
+                return (-ENODEV);
+        }
 
         if (data[0] != DDC_DEFAULT_DEVICE_ADDR) {
-                err = EIO;
+                DPRINTF("ddc_probe_device: invalid response! line 144 return value=-EIO\n");
+                ret = -EIO;
                 goto out;
         }
 
         if (ddc_checksum(data, sizeof data) != 0) {
-                err = EIO;
+                DPRINTF("ddc_probe_device: invalid response! line 150 return value=-EIO\n");
+                ret = -EIO;
                 goto out;
         }
 
-        err = 0;
+        ret = 0;
 out:
-        iic_release_bus(dm->dm_tag, cold ? I2C_F_POLL : 0);
         rw_exit_read(&ddcs_lock);
-        return (err);
+        return (ret);
 }
 
 /*
@@ -132,8 +165,8 @@ out:
  * starting from a value derived from the monitor's bus address
  * Returns the checksum.
  */
-unsigned char
-ddc_checksum(unsigned char *cmd, unsigned int len)
+uint8_t
+ddc_checksum(uint8_t *cmd, unsigned int len)
 {
         unsigned int i, sum;
         sum = (unsigned char)(DDC_MONITOR_ADDR << 1);
@@ -141,5 +174,5 @@ ddc_checksum(unsigned char *cmd, unsigned int len)
         for (i = 0; i < len; i++)
                 sum ^= cmd[i];
 
-        return ((unsigned char)sum);
+        return ((uint8_t)sum);
 }
