@@ -31,7 +31,7 @@ struct rwlock ddcs_lock = RWLOCK_INITIALIZER("ddclk");
 int             ddc_register(struct device *, struct i2c_adapter *, i2c_addr_t);
 void            ddc_unregister(struct device *);
 int             ddc_probe_device(struct device *, struct i2c_adapter *);
-unsigned char   ddc_checksum(unsigned char *, unsigned int);
+unsigned char   ddc_checksum(uint8_t *, unsigned int);
 
 /*
  * Allocate a ddc_mapping for the given GPU driver instance,
@@ -39,7 +39,7 @@ unsigned char   ddc_checksum(unsigned char *, unsigned int);
  * end of the TAILQ.
  */
 int
-ddc_register(struct device *dev, i2c_adapter *adapter, i2c_addr_t addr)
+ddc_register(struct device *dev, struct i2c_adapter *adapter, i2c_addr_t addr)
 {
         struct ddc_mapping *dm;
         dm = malloc(sizeof(*dm), M_DEVBUF, M_NOWAIT);
@@ -87,11 +87,11 @@ ddc_unregister(struct device *dev)
  * Return zero on success, or a negative error code on failure.
  */
 int
-ddc_probe_device(struct device *dev, struct i2c_adapter *adapter, i2c_tag_t tag)
+ddc_probe_device(struct device *dev, struct i2c_adapter *adapter)
 {
         struct ddc_mapping *dm;
         struct i2c_msg msg;
-        uint8_t data[32], cmd[6];
+        uint8_t data[3], cmd[6];
         int ret;
         rw_enter_read(&ddcs_lock);
 
@@ -118,10 +118,10 @@ ddc_probe_device(struct device *dev, struct i2c_adapter *adapter, i2c_tag_t tag)
         msg.buf = cmd;
         msg.len = sizeof(cmd);
 
-        ret = i2c_transfer(dm->dm_adapter, msg, 1);
+        ret = i2c_transfer(dm->dm_adapter, &msg, 1);
 
         if (ret < 0) {
-                DPRINTF("ddc_probe_device: write failed! line 123 return value=%d\n", ret);
+                DPRINTF("ddc_probe_device: write failed! return value=%d\n", ret);
                 goto out;
         }
 
@@ -131,26 +131,21 @@ ddc_probe_device(struct device *dev, struct i2c_adapter *adapter, i2c_tag_t tag)
         msg.buf = data;
         msg.len = sizeof(data);
 
-        ret = i2c_transfer(dm->dm_adapter, msg, 1);
+        ret = i2c_transfer(dm->dm_adapter, &msg, 1);
 
         if (ret < 0) {
-                DPRINTF("ddc_probe_device: write failed! line 136 return value=%d\n", ret);
+                DPRINTF("ddc_probe_device: read failed! return value=%d\n", ret);
                 goto out;
-        }
-        
-        if (ret < 3) {
-                DPRINTF("ddc_probe_device: no response from device! line 141 return value=-ENODEV\n");
-                return (-ENODEV);
         }
 
         if (data[0] != DDC_DEFAULT_DEVICE_ADDR) {
-                DPRINTF("ddc_probe_device: invalid response! line 146 return value=-EIO\n");
+                DPRINTF("ddc_probe_device: invalid response! data[0]=0x%x\n", data[0]);
                 ret = -EIO;
                 goto out;
         }
 
-        if (ddc_checksum(data, sizeof data) != 0) {
-                DPRINTF("ddc_probe_device: invalid response! line 152 return value=-EIO\n");
+        if (ddc_checksum(data, 3) != 0) {
+                DPRINTF("ddc_probe_device: checksum failed!\n");
                 ret = -EIO;
                 goto out;
         }
