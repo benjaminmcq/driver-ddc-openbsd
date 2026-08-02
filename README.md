@@ -1,7 +1,8 @@
 NOTICE: This driver is still WIP and isn't in the OpenBSD tree yet.
 
 PRs are accepted as well as feedback
-ported from here: https://gitlab.com/ddcci-driver-linux/ddcci-driver-linux
+
+This driver is ported from here: https://gitlab.com/ddcci-driver-linux/ddcci-driver-linux
 
 I plan to get this into the source tree when it's finished likely under the directory sys/dev/i2c as well as a utility in ports to control it.
 
