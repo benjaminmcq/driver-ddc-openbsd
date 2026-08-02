@@ -28,9 +28,9 @@ struct ddc_mapping {
 TAILQ_HEAD(, ddc_mapping) ddcs = TAILQ_HEAD_INITIALIZER(ddcs);
 struct rwlock ddcs_lock = RWLOCK_INITIALIZER("ddclk");
 
-int             ddc_register(struct device *, i2c_adapter *, i2c_addr_t);
+int             ddc_register(struct device *, struct i2c_adapter *, i2c_addr_t);
 void            ddc_unregister(struct device *);
-int             ddc_probe_device(struct device *, i2c_adapter *);
+int             ddc_probe_device(struct device *, struct i2c_adapter *);
 unsigned char   ddc_checksum(unsigned char *, unsigned int);
 
 /*
