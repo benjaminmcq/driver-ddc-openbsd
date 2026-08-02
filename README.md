@@ -9,3 +9,5 @@ I plan to get this into the source tree when it's finished likely under the dire
 The planned architecture in question:
 don't provide generic ioctl access from userland straight to the connector or anything, really.
 this driver's purpose is to open a handle at /dev/ddc* and accepts commands controlling the monitor.
+
+compilation instructions not given
