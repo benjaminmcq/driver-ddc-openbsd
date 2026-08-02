@@ -31,7 +31,7 @@ struct rwlock ddcs_lock = RWLOCK_INITIALIZER("ddclk");
 int             ddc_register(struct device *, struct i2c_adapter *, i2c_addr_t);
 void            ddc_unregister(struct device *);
 int             ddc_probe_device(struct device *, struct i2c_adapter *);
-unsigned char   ddc_checksum(uint8_t *, unsigned int);
+unsigned char   ddc_checksum(uint8_t *, unsigned int, i2c_addr_t);
 
 /*
  * Allocate a ddc_mapping for the given GPU driver instance,
@@ -91,8 +91,8 @@ ddc_probe_device(struct device *dev, struct i2c_adapter *adapter)
 {
         struct ddc_mapping *dm;
         struct i2c_msg msg;
-        uint8_t data[3], cmd[6];
-        int ret;
+        uint8_t data[32], cmd[6];
+        int ret, len;
         rw_enter_read(&ddcs_lock);
 
         TAILQ_FOREACH(dm, &ddcs, dm_link) {
@@ -101,17 +101,19 @@ ddc_probe_device(struct device *dev, struct i2c_adapter *adapter)
         }
 
         if (dm == NULL || dm->dm_dev == NULL || dm->dm_adapter == NULL || dm->dm_addr == 0) {
-                DPRINTF("ddc_probe_device: failed on line 101");
+                DPRINTF("ddc_probe_device: one or more of the members in ddc_mapping was NULL!");
                 ret = -ENOENT;
                 goto out;
         }
+
+        len = sizeof(cmd);
         
         cmd[0] = DDC_HOST_ADDR_ODD;
         cmd[1] = DDC_PFLAG | 3;
         cmd[2] = DDC_CMD_CAPS;
         cmd[3] = 0;
         cmd[4] = 0;
-        cmd[5] = ddc_checksum(cmd, 5);
+        cmd[5] = ddc_checksum(cmd, len, DDC_MONITOR_ADDR << 1);
 
         msg.addr = dm->dm_addr;
         msg.flags = 0;
@@ -125,7 +127,7 @@ ddc_probe_device(struct device *dev, struct i2c_adapter *adapter)
                 goto out;
         }
 
-        tsleep_nsec(NULL, PWAIT, "ddc", MSEC_TO_NSEC(60));
+        tsleep_nsec(dm, PWAIT, "ddc", MSEC_TO_NSEC(60));
 
         msg.flags = I2C_M_RD;
         msg.buf = data;
@@ -144,7 +146,16 @@ ddc_probe_device(struct device *dev, struct i2c_adapter *adapter)
                 goto out;
         }
 
-        if (ddc_checksum(data, 3) != 0) {
+        /* Strip PFLAG add header and checksum byte to get message length */
+        len = 2 + (data[1] & 0x7F) + 1;
+
+        if (len > sizeof(data)) {
+                DPRINTF("ddc_probe_device: response too long! len=%d\n", len);
+                ret = -EIO;
+                goto out;
+        }
+
+        if (ddc_checksum(data, len, DDC_HOST_ADDR_EVEN) != 0) {
                 DPRINTF("ddc_probe_device: checksum failed!\n");
                 ret = -EIO;
                 goto out;
@@ -162,7 +173,7 @@ out:
  * Returns the checksum.
  */
 uint8_t
-ddc_checksum(uint8_t *cmd, unsigned int len)
+ddc_checksum(uint8_t *cmd, unsigned int len, i2c_addr_t addr)
 {
         unsigned int i, sum;
         sum = (unsigned char)(DDC_MONITOR_ADDR << 1);
