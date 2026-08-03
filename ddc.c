@@ -25,6 +25,7 @@
 
 #include <dev/i2c/i2cvar.h>
 #include <dev/i2c/ddc.h>
+#include <dev/i2c/ddc_ioctl.h>
 
 #define DDC_DEBUG
 
