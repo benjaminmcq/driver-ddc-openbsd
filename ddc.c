@@ -48,6 +48,10 @@ int             ddc_register(struct device *, struct i2c_adapter *, i2c_addr_t);
 void            ddc_unregister(struct device *);
 int             ddc_probe_device(struct device *, struct i2c_adapter *);
 unsigned char   ddc_checksum(uint8_t *, unsigned int, i2c_addr_t);
+void	        ddcattach(int);
+int	        ddcclose(dev_t, int, int, struct proc *);
+int	        ddcioctl(dev_t, u_long, caddr_t, int, struct proc *);
+int	        ddcopen(dev_t, int, int, struct proc *);
 
 /*
  * Allocate a ddc_mapping for the given GPU driver instance,
@@ -198,4 +202,52 @@ ddc_checksum(uint8_t *cmd, unsigned int len, i2c_addr_t addr)
                 sum ^= cmd[i];
 
         return ((uint8_t)sum);
+}
+
+void
+ddcattach(int nunits)
+{
+}
+
+int
+ddcopen(dev_t dev, int flags, int mode, struct proc *p)
+{
+        if (minor(dev) != 0)
+                return (ENXIO);
+	return (0);
+}
+
+int
+ddcclose(dev_t dev, int flags, int mode, struct proc *p)
+{
+	return (0);
+}
+
+int
+ddcioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
+{
+        struct ddc_probe_args *dpa = (struct ddc_probe_args *)data;
+        struct ddc_mapping *dm;
+
+        switch (cmd) {
+        case DDCIOCPROBE:
+                dpa->dpa_name[sizeof dpa->dpa_name - 1] = '\0';
+                rw_enter_read(&ddcs_lock);
+                dm = NULL;
+                TAILQ_FOREACH(dm, &ddcs, dm_link) {
+                        printf("ddc_ioctl debug: entry in list is '%s'\n", dm->dm_dev->dv_xname);
+                }
+
+                TAILQ_FOREACH(dm, &ddcs, dm_link) {
+                        if (strcmp(dm->dm_dev->dv_xname, dpa->dpa_name) == 0)
+                                break;
+                }
+
+                rw_exit_read(&ddcs_lock);
+                if (dm == NULL)
+                        return (ENOENT);
+                return ddc_probe_device(dm->dm_dev, dm->dm_adapter);
+        default:
+                return (ENOTTY);
+        }
 }
