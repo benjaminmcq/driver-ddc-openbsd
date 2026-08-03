@@ -49,9 +49,9 @@ void            ddc_unregister(struct device *);
 int             ddc_probe_device(struct device *, struct i2c_adapter *);
 unsigned char   ddc_checksum(uint8_t *, unsigned int, i2c_addr_t);
 void	        ddcattach(int);
-int	        ddcclose(dev_t, int, int, struct proc *);
-int	        ddcioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	        ddcopen(dev_t, int, int, struct proc *);
+int	        	ddcclose(dev_t, int, int, struct proc *);
+int	        	ddcioctl(dev_t, u_long, caddr_t, int, struct proc *);
+int	        	ddcopen(dev_t, int, int, struct proc *);
 
 /*
  * Allocate a ddc_mapping for the given GPU driver instance,
@@ -122,7 +122,7 @@ ddc_probe_device(struct device *dev, struct i2c_adapter *adapter)
 
         if (dm == NULL || dm->dm_dev == NULL || dm->dm_adapter == NULL || dm->dm_addr == 0) {
                 DPRINTF("ddc_probe_device: one or more of the members in ddc_mapping was NULL!");
-                ret = -ENOENT;
+                ret = ENOENT;
                 goto out;
         }
 
@@ -162,7 +162,7 @@ ddc_probe_device(struct device *dev, struct i2c_adapter *adapter)
 
         if (data[0] != DDC_DEFAULT_DEVICE_ADDR) {
                 DPRINTF("ddc_probe_device: invalid response! data[0]=0x%x\n", data[0]);
-                ret = -EIO;
+                ret = EIO;
                 goto out;
         }
 
@@ -171,13 +171,13 @@ ddc_probe_device(struct device *dev, struct i2c_adapter *adapter)
 
         if (len > sizeof(data)) {
                 DPRINTF("ddc_probe_device: response too long! len=%d\n", len);
-                ret = -EIO;
+                ret = EIO;
                 goto out;
         }
 
         if (ddc_checksum(data, len, DDC_HOST_ADDR_EVEN) != 0) {
                 DPRINTF("ddc_probe_device: checksum failed!\n");
-                ret = -EIO;
+                ret = EIO;
                 goto out;
         }
 
@@ -196,7 +196,7 @@ uint8_t
 ddc_checksum(uint8_t *cmd, unsigned int len, i2c_addr_t addr)
 {
         unsigned int i, sum;
-        sum = (unsigned char)(DDC_MONITOR_ADDR << 1);
+        sum = (unsigned char)(addr);
 
         for (i = 0; i < len; i++)
                 sum ^= cmd[i];
