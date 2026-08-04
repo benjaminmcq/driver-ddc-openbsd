@@ -189,6 +189,102 @@ out:
 }
 
 /*
+int
+ddc_get_caps(struct device *dev, struct i2c_adapter *adapter)
+{
+        struct ddc_mapping *dm;
+        struct i2c_msg msg;
+        uint8_t = cmd[6], data[32];
+		uint8_t *buf = malloc(35, M_DEVBUF, M_WAITOK | M_ZERO);
+        int ret, len;
+        rw_enter_read(&ddcs_lock);
+
+        TAILQ_FOREACH(dm, &ddcs, dm_link) {
+                if (dm->dm_dev == dev && dm->dm_adapter == adapter)
+                        break;
+        }
+
+        if (dm == NULL || dm->dm_dev == NULL || dm->dm_adapter == NULL || dm->dm_addr == 0) {
+                DPRINTF("ddc_probe_device: one or more of the members in ddc_mapping was NULL!");
+                ret = ENOENT;
+                goto out;
+        }
+
+        len = sizeof(cmd);
+        
+        cmd[0] = DDC_HOST_ADDR_ODD;
+        cmd[1] = DDC_PFLAG | 3;
+        cmd[2] = DDC_CMD_CAPS;
+        cmd[3] = 0;
+        cmd[4] = 0;
+        cmd[5] = ddc_checksum(cmd, len, DDC_MONITOR_ADDR << 1);
+
+        msg.addr = dm->dm_addr;
+        msg.flags = 0;
+        msg.buf = cmd;
+        msg.len = sizeof(cmd);
+
+        ret = i2c_transfer(dm->dm_adapter, &msg, 1);
+
+        if (ret < 0) {
+                DPRINTF("ddc_probe_device: write failed! return value=%d\n", ret);
+                goto out;
+        }
+
+        tsleep_nsec(dm, PWAIT, "ddc", MSEC_TO_NSEC(60));
+
+        msg.flags = I2C_M_RD;
+        msg.buf = buf;
+        msg.len = (len > 32) ? 35 : len + 3;
+
+        ret = i2c_transfer(dm->dm_adapter, &msg, 1);
+
+        if (ret < 0) {
+                DPRINTF("ddc_probe_device: read failed! return value=%d\n", ret);
+                goto out;
+        }
+
+        if (buf[0] != DDC_DEFAULT_DEVICE_ADDR) {
+                DPRINTF("ddc_probe_device: invalid response! buf[0]=0x%x\n", buf[0]);
+                ret = EIO;
+                goto out;
+        }
+
+		if (chunkbuf[1] != cmd[1] || chunkbuf[2] != cmd[2]) {
+				ret = EIO;
+				goto out;
+		}
+
+        if (ddc_checksum(buf, len, DDC_HOST_ADDR_EVEN) != 0) {
+                DPRINTF("ddc_probe_device: checksum failed!\n");
+                ret = EIO;
+                goto out;
+        }
+
+		memcpy(buf, chunkbuf + 3, min((unsigned int)result - 3, len));
+
+		unsigned int bytes_copied = min((unsigned int)result - 3, len);
+		
+		DPRINTF("Monitor Capabilities: ");
+		for (unsigned int i = 0; i < bytes_copied; i++) {
+				if (buf[i] >= 32 && buf[i] <= 126) {
+						DPRINTF("%c", buf[i]);
+				} else {
+						DPRINTF("[%02X]", buf[i]); 
+				}
+		}
+		DPRINTF("\n");
+
+        ret = 0;
+out:
+        rw_exit_read(&ddcs_lock);
+		free(buf);
+        return (ret);
+}
+
+
+
+/*
  * Compute the DDC/CI checksum for the given command payload,
  * starting from a value derived from the monitor's bus address
  * Returns the checksum.
