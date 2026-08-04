@@ -331,8 +331,9 @@ ddcioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
                 dpa->dpa_name[sizeof dpa->dpa_name - 1] = '\0';
                 rw_enter_read(&ddcs_lock);
                 dm = NULL;
+			
                 TAILQ_FOREACH(dm, &ddcs, dm_link) {
-                        printf("ddc_ioctl debug: entry in list is '%s'\n", dm->dm_dev->dv_xname);
+                        DPRINTF("ddc_ioctl debug: entry in list is '%s'\n", dm->dm_dev->dv_xname);
                 }
 
                 TAILQ_FOREACH(dm, &ddcs, dm_link) {
@@ -344,6 +345,27 @@ ddcioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
                 if (dm == NULL)
                         return (ENOENT);
                 return ddc_probe_device(dm->dm_dev, dm->dm_adapter);
+		/*
+		case DDCIOCREADCAPS:
+                dpa->dpa_name[sizeof dpa->dpa_name - 1] = '\0';
+                rw_enter_read(&ddcs_lock);
+                dm = NULL;
+
+			    TAILQ_FOREACH(dm, &ddcs, dm_link) {
+                        DPRINTF("ddc_ioctl debug: entry in list is '%s'\n", dm->dm_dev->dv_xname);
+                }
+			
+                TAILQ_FOREACH(dm, &ddcs, dm_link) {
+                        if (strcmp(dm->dm_dev->dv_xname, dpa->dpa_name) == 0)
+                                break;
+                }
+			
+                rw_exit_read(&ddcs_lock);
+			
+                if (dm == NULL)
+                        return (ENOENT);
+                return ddc_read_caps(dm->dm_dev, dm->dm_adapter);
+		*/
         default:
                 return (ENOTTY);
         }
