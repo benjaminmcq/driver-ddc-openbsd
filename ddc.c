@@ -127,7 +127,7 @@ ddc_probe_device(struct device *dev, struct i2c_adapter *adapter)
                 goto out;
         }
 
-        len = sizeof(cmd);
+        len = sizeof(cmd) - 1;
         
         cmd[0] = DDC_HOST_ADDR_ODD;
         cmd[1] = DDC_PFLAG | 3;
