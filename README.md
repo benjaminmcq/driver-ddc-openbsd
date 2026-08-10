@@ -11,3 +11,6 @@ don't provide generic ioctl access from userland straight to the connector or an
 this driver's purpose is to open a handle at /dev/ddc* and accepts commands controlling the monitor.
 
 compilation instructions not given
+
+NOTE FOR DEV BRANCH:
+THIS BRANCH IS STRICTLY UNTESTED
