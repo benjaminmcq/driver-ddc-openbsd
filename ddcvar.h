@@ -33,5 +33,7 @@ int   ddc_probe_device(struct device *, struct i2c_adapter *);
 #define DDC_HOST_REPLY_CAPS      0xE3
 #define DDC_MONITOR_ADDR         0x37
 #define DDC_PFLAG                0x80
+#define DDC_MAX_CAPS_STRING	 16384
+#define DDC_MAX_CAP_CHUNKS	 ((DDC_MAX_CAPS_STRING / 16) + 8)
 
 #endif /* _SYS_DEV_DDCVAR_H_ */

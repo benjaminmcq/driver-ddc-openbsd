@@ -24,7 +24,7 @@ struct ddc_probe_args {
 };
 
 #define DDCIOCPROBE        _IOW('D', 0, struct ddc_probe_args)
-/* #define DDCIOCREADCAPS  _IO('D', 1) */
+#define DDCIOCREADCAPS  _IO('D', 1) */
 
 #endif /* _SYS_DEV_DDC_IOCTL_H_ */
 

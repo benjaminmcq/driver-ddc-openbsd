@@ -37,22 +37,25 @@
 
 struct ddc_mapping {
         TAILQ_ENTRY(ddc_mapping)        dm_link;
-        struct device                  *dm_dev;     /* Parent GPU driver instance (referred to as the GPU) */
-        struct i2c_adapter             *dm_adapter; /* I2C device that initiates transfers from within the GPU (I2C master) */
-        i2c_addr_t                      dm_addr;    /* Target monitor slave (I2C slave) */
+        struct device                  *dm_dev;		/* Parent GPU driver instance (referred to as the GPU) */
+        struct i2c_adapter             *dm_adapter;	/* I2C device that initiates transfers from within the GPU (I2C master) */
+        i2c_addr_t                      dm_addr;	/* Target monitor slave (I2C slave) */
+	uint8_t			       *dm_raw_caps;	/* Unparsed response to a capabilities request from the monitor */
+	uint32_t 		       *dm_caps;	/* Parsed monitor capabilities */
+	unsigned int			dm_caps_len;	/* Length of unparsed response to capabilities request */	
 };
 
 TAILQ_HEAD(, ddc_mapping) ddcs = TAILQ_HEAD_INITIALIZER(ddcs);
 struct rwlock ddcs_lock = RWLOCK_INITIALIZER("ddclk");
 
-int             ddc_register(struct device *, struct i2c_adapter *, i2c_addr_t);
-void            ddc_unregister(struct device *);
-int             ddc_probe_device(struct device *, struct i2c_adapter *);
-unsigned char   ddc_checksum(uint8_t *, unsigned int, i2c_addr_t);
-void	        ddcattach(int);
-int	        	ddcclose(dev_t, int, int, struct proc *);
-int	        	ddcioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	        	ddcopen(dev_t, int, int, struct proc *);
+int		ddc_register(struct device *, struct i2c_adapter *, i2c_addr_t);
+void		ddc_unregister(struct device *);
+int		ddc_probe_device(struct device *, struct i2c_adapter *);
+unsigned char	ddc_checksum(uint8_t *, unsigned int, i2c_addr_t);
+void 		ddcattach(int);
+int		ddcclose(dev_t, int, int, struct proc *);
+int		ddcioctl(dev_t, u_long, caddr_t, int, struct proc *);
+int		ddcopen(dev_t, int, int, struct proc *);
 
 /*
  * Allocate a ddc_mapping for the given GPU driver instance,
@@ -78,6 +81,7 @@ ddc_register(struct device *dev, struct i2c_adapter *adapter, i2c_addr_t addr)
 
         return (0);
 }
+
 /*
  * Remove and free every ddc_mapping registered for the given
  * device from the registered device list.
@@ -187,102 +191,128 @@ out:
         rw_exit_read(&ddcs_lock);
         return (ret);
 }
-
-/*
+/* TODO: Add function explanation here */
+/* TODO: On probe, free or make everything with capabilities 0 */
 int
 ddc_get_caps(struct device *dev, struct i2c_adapter *adapter)
 {
-        struct ddc_mapping *dm;
-        struct i2c_msg msg;
-        uint8_t = cmd[6], data[32];
-		uint8_t *buf = malloc(35, M_DEVBUF, M_WAITOK | M_ZERO);
-        int ret, len;
-        rw_enter_read(&ddcs_lock);
+	struct ddc_mapping *dm;
+	struct i2c_msg msg;
+	uint8_t cmd[6], *buf;
+	int ret, len;
+	rw_enter_read(&ddcs_lock);
+	unsigned int offset = 0, counter = 0, resp_len, payload_len, buf_len, cap_len;
 
-        TAILQ_FOREACH(dm, &ddcs, dm_link) {
-                if (dm->dm_dev == dev && dm->dm_adapter == adapter)
-                        break;
-        }
+	TAILQ_FOREACH(dm, &ddcs, dm_link) {
+		if (dm->dm_dev == dev && dm->dm_adapter == adapter)
+			break;
+	}
 
-        if (dm == NULL || dm->dm_dev == NULL || dm->dm_adapter == NULL || dm->dm_addr == 0) {
-                DPRINTF("ddc_probe_device: one or more of the members in ddc_mapping was NULL!");
+	if (dm == NULL || dm->dm_dev == NULL || dm->dm_adapter == NULL || dm->dm_addr == 0) {
+                DPRINTF("ddc_get_caps: one or more of the members in ddc_mapping was NULL!");
                 ret = ENOENT;
                 goto out;
         }
+	
+	buf = malloc(35, M_DEVBUF, M_WAITOK | M_ZERO);
 
-        len = sizeof(cmd);
-        
-        cmd[0] = DDC_HOST_ADDR_ODD;
-        cmd[1] = DDC_PFLAG | 3;
-        cmd[2] = DDC_CMD_CAPS;
-        cmd[3] = 0;
-        cmd[4] = 0;
-        cmd[5] = ddc_checksum(cmd, len, DDC_MONITOR_ADDR << 1);
+	// PERSONAL NOTE: ONLY WILL FAIL AND NEED ERROR HANDLING IF M_CANFAIL IS SUPPLIED
+	dm->dm_raw_caps = malloc(DDC_MAX_CAPS_STRING, M_DEVBUF, M_WAITOK | M_ZERO);
 
-        msg.addr = dm->dm_addr;
-        msg.flags = 0;
-        msg.buf = cmd;
-        msg.len = sizeof(cmd);
+	len = sizeof(cmd) - 1;
+	
 
-        ret = i2c_transfer(dm->dm_adapter, &msg, 1);
+	do {
+	        cmd[0] = DDC_HOST_ADDR_ODD;
+	        cmd[1] = DDC_PFLAG | 3;
+	        cmd[2] = DDC_CMD_CAPS;
+	        cmd[3] = (offset >> 8) & 0xFF;
+        	cmd[4] = offset & 0xFF;
+		cmd[5] = ddc_checksum(cmd, len, DDC_MONITOR_ADDR << 1);
 
-        if (ret < 0) {
-                DPRINTF("ddc_probe_device: write failed! return value=%d\n", ret);
-                goto out;
-        }
+		msg.addr = dm->dm_addr;
+		msg.flags = 0;
+		msg.buf = cmd;
+		msg.len = sizeof(cmd);
 
-        tsleep_nsec(dm, PWAIT, "ddc", MSEC_TO_NSEC(60));
+		ret = i2c_transfer(dm->dm_adapter, &msg, 1);
 
-        msg.flags = I2C_M_RD;
-        msg.buf = buf;
-        msg.len = (len > 32) ? 35 : len + 3;
-
-        ret = i2c_transfer(dm->dm_adapter, &msg, 1);
-
-        if (ret < 0) {
-                DPRINTF("ddc_probe_device: read failed! return value=%d\n", ret);
-                goto out;
-        }
-
-        if (buf[0] != DDC_DEFAULT_DEVICE_ADDR) {
-                DPRINTF("ddc_probe_device: invalid response! buf[0]=0x%x\n", buf[0]);
-                ret = EIO;
-                goto out;
-        }
-
-		if (chunkbuf[1] != cmd[1] || chunkbuf[2] != cmd[2]) {
-				ret = EIO;
-				goto out;
-		}
-
-        if (ddc_checksum(buf, len, DDC_HOST_ADDR_EVEN) != 0) {
-                DPRINTF("ddc_probe_device: checksum failed!\n");
-                ret = EIO;
-                goto out;
-        }
-
-		memcpy(buf, chunkbuf + 3, min((unsigned int)result - 3, len));
-
-		unsigned int bytes_copied = min((unsigned int)result - 3, len);
+		if (ret < 0) {
+                	DPRINTF("ddc_get_caps: write failed! return value=%d\n", ret);
+	                goto out;
+        	}
 		
-		DPRINTF("Monitor Capabilities: ");
-		for (unsigned int i = 0; i < bytes_copied; i++) {
-				if (buf[i] >= 32 && buf[i] <= 126) {
-						DPRINTF("%c", buf[i]);
-				} else {
-						DPRINTF("[%02X]", buf[i]); 
-				}
-		}
-		DPRINTF("\n");
+		tsleep_nsec(dm, PWAIT, "ddc", MSEC_TO_NSEC(60));
 
+		buf_len = 35;
+	        msg.flags = I2C_M_RD;
+        	msg.buf = buf;
+	        msg.len = buf_len;
+
+        	ret = i2c_transfer(dm->dm_adapter, &msg, 1);
+
+	        if (ret < 0) {
+        	        DPRINTF("ddc_get_caps: read failed! return value=%d\n", ret);
+                	goto out;
+        	}
+
+	        if (buf[0] != DDC_DEFAULT_DEVICE_ADDR) {
+        	        DPRINTF("ddc_get_caps: invalid response! buf[0]=0x%x\n", buf[0]);
+                	ret = EIO;
+	                goto out;
+		} 		
+
+		if (!(buf[1] & DDC_PFLAG)) {
+			DPRINTF("ddc_get_caps: length byte missing PFLAG! buf[1]=0x%x\n", buf[1]);
+			ret = EIO;
+			goto out;
+		}
+
+                payload_len = buf[1] & 0x7F;
+                resp_len = 2 + payload_len + 1;
+
+                if (resp_len > buf_len) {
+                        DPRINTF("ddc_get_caps: response too long! resp_len=%u\n", resp_len);
+                        ret = EIO;
+                        goto out;
+                }
+		
+                if (ddc_checksum(buf, resp_len - 1, DDC_HOST_ADDR_EVEN) != buf[resp_len - 1]) {
+                        DPRINTF("ddc_get_caps: checksum failed!\n");
+                        ret = EIO;
+                        goto out;
+                }
+		
+                if (payload_len < 3) {
+                        DPRINTF("ddc_get_caps: payload too short for opcode+offset!\n");
+                        ret = EIO;
+                        goto out;
+                }
+		
+                if (buf[2] != DDC_REPLY_CAPS || buf[3] != cmd[3] || buf[4] != cmd[4]) {
+                        DPRINTF("ddc_get_caps: echo bytes mismatch!\n");
+                        ret = EIO;
+                        goto out;
+                }
+
+                cap_len = payload_len - 3;
+                if (cap_len > 0) {
+                        unsigned int n = MIN(cap_len, DDC_MAX_CAPS_STRING - offset);
+                        memcpy(dm->dm_raw_caps + offset, buf + 5, n);
+                        offset += n;
+                }
+
+                counter++;
+        } while (cap_len > 0 && offset < DDC_MAX_CAPS_STRING && counter < DDC_MAX_CAP_CHUNKS);
+
+        dm->dm_caps_len = offset;
         ret = 0;
 out:
         rw_exit_read(&ddcs_lock);
-		free(buf);
+        if (buf != NULL)
+                free(buf, M_DEVBUF, 35);
         return (ret);
 }
-
-
 
 /*
  * Compute the DDC/CI checksum for the given command payload,
