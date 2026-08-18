@@ -208,15 +208,14 @@ ddc_get_caps(struct device *dev, struct i2c_adapter *adapter)
 			break;
 	}
 
+	buf = malloc(35, M_DEVBUF, M_WAITOK | M_ZERO);
+	
 	if (dm == NULL || dm->dm_dev == NULL || dm->dm_adapter == NULL || dm->dm_addr == 0) {
                 DPRINTF("ddc_get_caps: one or more of the members in ddc_mapping was NULL!");
                 ret = ENOENT;
                 goto out;
         }
-	
-	buf = malloc(35, M_DEVBUF, M_WAITOK | M_ZERO);
-
-	// PERSONAL NOTE: ONLY WILL FAIL AND NEED ERROR HANDLING IF M_CANFAIL IS SUPPLIED
+		
 	dm->dm_raw_caps = malloc(DDC_MAX_CAPS_STRING, M_DEVBUF, M_WAITOK | M_ZERO);
 
 	len = sizeof(cmd) - 1;
@@ -289,7 +288,7 @@ ddc_get_caps(struct device *dev, struct i2c_adapter *adapter)
                         goto out;
                 }
 		
-                if (buf[2] != DDC_REPLY_CAPS || buf[3] != cmd[3] || buf[4] != cmd[4]) {
+                if (buf[2] != DDC_HOST_REPLY_CAPS || buf[3] != cmd[3] || buf[4] != cmd[4]) {
                         DPRINTF("ddc_get_caps: echo bytes mismatch!\n");
                         ret = EIO;
                         goto out;
@@ -306,6 +305,8 @@ ddc_get_caps(struct device *dev, struct i2c_adapter *adapter)
         } while (cap_len > 0 && offset < DDC_MAX_CAPS_STRING && counter < DDC_MAX_CAP_CHUNKS);
 
         dm->dm_caps_len = offset;
+
+        DPRINTF("ddc_get_caps: raw caps string: %.*s\n", (int)dm->dm_caps_len, (char *)dm->dm_raw_caps);
         ret = 0;
 out:
         rw_exit_read(&ddcs_lock);
@@ -375,28 +376,46 @@ ddcioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
                 if (dm == NULL)
                         return (ENOENT);
                 return ddc_probe_device(dm->dm_dev, dm->dm_adapter);
-		/*
-		case DDCIOCREADCAPS:
-                dpa->dpa_name[sizeof dpa->dpa_name - 1] = '\0';
-                rw_enter_read(&ddcs_lock);
-                dm = NULL;
 
-			    TAILQ_FOREACH(dm, &ddcs, dm_link) {
-                        DPRINTF("ddc_ioctl debug: entry in list is '%s'\n", dm->dm_dev->dv_xname);
-                }
+case DDCIOCREADCAPS: {
+
+	int ret;
+	
+        dpa->dpa_name[sizeof dpa->dpa_name - 1] = '\0';
+        rw_enter_read(&ddcs_lock);
+	
+        dm = NULL;
+	
+        TAILQ_FOREACH(dm, &ddcs, dm_link) {
+                if (strcmp(dm->dm_dev->dv_xname, dpa->dpa_name) == 0)
+                        break;
+	}
+	
+        rw_exit_read(&ddcs_lock);
+
+        if (dm == NULL)
+                return (ENOENT);
+
+        ret = ddc_get_caps(dm->dm_dev, dm->dm_adapter);
+	
+        if (ret != 0)
+                return (ret);
+
+        {
+                unsigned int n = MIN(dm->dm_caps_len, dpa->dpa_caps_buf_len);
+                int cret = copyout(dm->dm_raw_caps, dpa->dpa_caps_buf, n);
+		
+                if (cret != 0)
+                        return (cret);
 			
-                TAILQ_FOREACH(dm, &ddcs, dm_link) {
-                        if (strcmp(dm->dm_dev->dv_xname, dpa->dpa_name) == 0)
-                                break;
-                }
-			
-                rw_exit_read(&ddcs_lock);
-			
-                if (dm == NULL)
-                        return (ENOENT);
-                return ddc_read_caps(dm->dm_dev, dm->dm_adapter);
-		*/
+                dpa->dpa_caps_len = n;
+        }
+        return (0);
+}
         default:
+	
                 return (ENOTTY);
         }
 }
+
+
